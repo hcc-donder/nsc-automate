@@ -1,0 +1,1 @@
+This contains all the files that should be uploaded to the NSC FTP server. Processing is controlled by the nscconfig.yml file.

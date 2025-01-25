@@ -1,0 +1,48 @@
+nsc:
+  ftp:
+    host: ftps.nslc.org
+    port: 22
+    username: username
+    password: password
+    protocol: sftp
+    receive_path: /Home/username/receive
+    send_path: /Home/username
+  local:
+    receive_path: receive_path
+    send_path: send_path
+    archive_path: archive_path
+    log_file: //path/to/nsc_log.csv
+    file_path: //resulting/file/path/to/NSC
+  rename:
+    # The file names on the FTP server are in the format of "CCCCCCCC_IIIIII_TYPE_MODE_MMDDYYYYHHMMSS_fn.ext".
+    # The CCCCCCCC section is the school code (<schoolcode>).
+    # The IIIIII section is the run index value (<idx>).
+    # The TYPE section is one of: AGGRRPT, ANALYSISRDY, CNTLRPT, or DETLRPT (<nsctype>).
+    # The MODE section is one of: SE or PA (<nscmode>).
+    # The MMDDYYYYHHMMSS section is the date and time of processing (<subdatetime> and <subdatetime_dt>).
+    # The fn section contains the submitted file name in lower case (<fn>).
+    # The ext section is the file extension (<ext>).
+    IPEDS: # 
+      mode: SE
+      pattern: 'ipeds_(?P<code>.*)_(?P<year>\d{4})_se'
+      replace: '{schoolcode}_{nsctype}_{nscmode}_{subdatetime}_ipeds_{code}_{year}_se.{ext}'
+      desc: "This is not complete."
+      import: true
+    COHORT1:
+      mode: PA
+      pattern: 'sometext_(?P<termidx>\d+)_(?P<termid>\d\d\d\d(FA|SP|SU))_(?P<desc>.*)'
+      replace: "{termidx}_{termid}_{nsctype}_{nscmode}_sometext_{desc}.{ext}"
+      import: true
+    COHORT1_OTHER:
+      mode: PA
+      pattern: '(?P<pre>.*)_(?P<termidx>\d+)_(?P<termid>\d\d\d\d(FA|SP|SU))_(?P<desc>.*)'
+      replace: "{termidx}_{termid}_{nsctype}_{nscmode}_{pre}_{desc}.{ext}"
+      import: false
+    COHORT2_OTHER:
+      mode: PA
+      pattern: '(?P<pre>.*)_(?P<termid1>\d\d\d\d(FA|SP|SU))-(?P<termid2>\d\d\d\d(FA|SP|SU))_(?P<desc>.*)'
+      replace: "{termid1}-{termid2}_{nsctype}_{nscmode}_{pre}_{desc}.{ext}"
+      import: false
+  import:
+      type: DETLRPT
+      cmd: './nsc_import_db.py "{entry}" "{fn}" "{dt}"'

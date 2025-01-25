@@ -1,0 +1,14 @@
+nscconfig.yml
+archive/*.csv
+archive/*.htm*
+archive/*.txt
+dev/*
+presentations/*
+receive/*.csv
+receive/*.htm*
+receive/*.txt
+receive/_Archive/*
+nsc_import_test.duckdb
+*.SAV
+nsc_log.csv
+receive/__Latest File Date
