@@ -35,22 +35,7 @@ import yaml
 from paramiko import Transport
 from pathlib import Path
 
-def find_root(file_name, start_path=None):
-    """
-    Recursively find the root directory containing a specific file.
-
-    Args:
-        file_name (str): The name of the file to search for.
-        start_path (str or Path, optional): The starting directory. Defaults to the current working directory.
-
-    Returns:
-        Path: The Path object for the directory containing the file, or the current directory if not found.
-    """
-    start_path = Path(start_path or Path.cwd())
-    for parent in start_path.parents:
-        if (parent / file_name).exists():
-            return parent
-    return Path.cwd()
+from support_scripts import find_root, merge_dicts
 
 # %% Constants
 CURRENT_DATETIME: Final[datetime] = datetime.now()
@@ -62,18 +47,7 @@ ROOT_PATH: Final[Path] = find_root("_IERG_SHARED_ROOT_DIR_")
 NSC_PATH: Final[Path] = Path(ROOT_PATH / Path("nsc"))
 DATA_PATH: Final[Path] = Path(ROOT_PATH / Path("Data"))
 CONFIG_FILE: Final[Path] = Path(DATA_PATH / "config1.yml")
-
-def get_secrets(password: Optional[str] = None) -> str:
-    """
-    Get the secret from 1Password using the op command line tool
-    :param password: The name of the password in 1Password
-    :return: The secret value
-    """
-    # Using the command line, run the following command to get the secret:
-    # op read <password>
-    # return the output of the command
-    command: str = f"op read {password}"
-    return os.popen(command).read().strip()
+NSC_CONFIG_FILE: Final[Path] = Path(NSC_PATH / "nscconfig.yml")
 
 def main():
     """
@@ -85,10 +59,24 @@ def main():
     3. Open the log file for appending new log entries.
     """
 
-    # Open the config.yml file and load the contents into the cfg variable
-    with open(CONFIG_FILE, "r", encoding="utf-8") as file:
-        cfg: Dict = yaml.load(file, Loader=yaml.FullLoader)
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as file:
+            ccdw_cfg: Dict = yaml.load(file, Loader=yaml.FullLoader)
+    except FileNotFoundError:
+        ccdw_cfg = {}
 
+    try:
+        with open(NSC_CONFIG_FILE, "r", encoding="utf-8") as file:
+            nsc_cfg: Dict = yaml.load(file, Loader=yaml.FullLoader)
+    except FileNotFoundError:
+        nsc_cfg = {}
+
+    # Merge the cfg and nsccfg dictionaries
+    cfg = merge_dicts(ccdw_cfg, nsc_cfg)
+
+    # Delete the partial dictionaries
+    del ccdw_cfg
+    del nsc_cfg
     send_path: str = cfg["nsc"]["ftp"]["send_path"]
     local_send_path: str = cfg["nsc"]["local"]["send_path"]
     archive_path: str = cfg["nsc"]["local"]["archive_path"]

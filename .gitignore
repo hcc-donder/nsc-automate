@@ -8,7 +8,8 @@ receive/*.csv
 receive/*.htm*
 receive/*.txt
 receive/_Archive/*
-nsc_import_test.duckdb
+*.duckdb
 *.SAV
 nsc_log.csv
 receive/__Latest File Date
+*.zip
