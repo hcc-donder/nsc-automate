@@ -40,7 +40,7 @@ from paramiko import Transport
 
 from pathlib import Path
 
-from support_scripts import find_root
+from support_scripts import find_root, merge_dicts
 
 ####
 # %% Constants
@@ -56,8 +56,11 @@ CURRENT_DATETIME_STR: Final[str] = CURRENT_DATETIME.strftime("%Y%m%d_%H%M%S")
 ROOT_PATH: Final[Path] = find_root("_IERG_SHARED_ROOT_DIR_")
 NSC_PATH: Final[Path] = Path(ROOT_PATH / Path("nsc"))
 DATA_PATH: Final[Path] = Path(ROOT_PATH / Path("Data"))
-CONFIG_FILE: Final[Path] = Path(DATA_PATH / "config1.yml")
+CONFIG_FILE: Final[Path] = Path(DATA_PATH / "config.yml")
+NSC_CONFIG_FILE: Final[Path] = Path(NSC_PATH / "nscconfig.yml")
 
+# The current path of this script file
+SCRIPT_PATH: Final[Path] = Path(__file__).resolve().parent
 
 def main():
     """
@@ -69,23 +72,25 @@ def main():
     3. Open the log file for appending new log entries.
     """
     # Open the model.yml file and load the contents into the model variable
-    with open(CONFIG_FILE, "r", encoding="utf-8") as file:
-        cfg: Dict = yaml.load(file, Loader=yaml.FullLoader)
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as file:
+            ccdw_cfg: Dict = yaml.load(file, Loader=yaml.FullLoader)
+    except FileNotFoundError:
+        ccdw_cfg = {}
 
-    # Open log file as duckdb database
-    log_file = Path(cfg["nsc"]["local"]["log_file"])
-    if not log_file.exists():
-        # Create the log file if it does not exist
-        with open(log_file, mode='w', newline='', encoding='utf-8') as file:
-            writer = csv.writer(file)
-            writer.writerow(["nsc_file_name", "local_file_name", "file_date_time", "status", "date_time"])
+    try:
+        with open(NSC_CONFIG_FILE, "r", encoding="utf-8") as file:
+            nsc_cfg: Dict = yaml.load(file, Loader=yaml.FullLoader)
+    except FileNotFoundError:
+        nsc_cfg = {}
 
-    # Open the log file for appendingmain():
-    # Open the model.yml file and load the contents into the model variable
-    with open(CONFIG_FILE, "r", encoding="utf-8") as file:
-        cfg: Dict = yaml.load(file, Loader=yaml.FullLoader)
+    # Merge the cfg and nsccfg dictionaries
+    cfg = merge_dicts(ccdw_cfg, nsc_cfg)
 
-    # Open log file as duckdb database
+    # Delete the partial dictionaries
+    del ccdw_cfg
+    del nsc_cfg
+
     log_file = Path(cfg["nsc"]["local"]["log_file"])
     if not log_file.exists():
         # Create the log file if it does not exist
@@ -129,6 +134,8 @@ def main():
 
     file_datetime: Optional[datetime] = None
 
+    added_base: Dict[str, str] = {}
+
     # Iterate over the list of files and their attributes
     for file_attr in sftp.listdir_attr():
         file_name: str = file_attr.filename
@@ -146,50 +153,98 @@ def main():
 
         print(f"Downloading file: [{file_name}], Date and Time: {file_datetime}")
 
-        # The file names on the FTP server are in the format of "dddddddd_dddddd_TYPE_MODE_MMDDYYYYHHMMSS_(PRE_)TTTTT(-TTTTT)_submitted.ext".
-        # The characters represented by 'd' should be deleted from the resulting file name.
+        if added_base:
+            # Need to remove all the base variables from the previous iteration
+            for key in list(added_base.keys()):
+                del globals()[key]
+                added_base[key]
+
+        # The file names on the FTP server are in the format of "CCCCCCCC_IIIIII_TYPE_MODE_MMDDYYYYHHMMSS_fn.ext".
         # The TYPE section is one of: AGGRRPT, ANALYSISRDY, CNTLRPT, or DETLRPT.
-        # The MODE section is one of: SE or PA.
-        # The PRE section is optional and contains a prefix that should be saved as part of the file name (see below).
-        # The TTTTT sections are term codes or term ids. The second one is optional. These should be saved as part of the file name.
-        # The submitted section is text that should be saved as part of the file name.
-        # The ext section is the file extension and will be either csv or htm.
-        # The resulting local file name should be in the format of "TTTTT(-TTTTT)_TYPE_MODE_PRE_submitted.ext".
+        # The MODE section is one of: DA, SE, or PA.
 
         # Use regular expression to extract parts of the file name
         # The pattern is broken down into named groups for clarity
         pattern = (
             r"^"  # Start of the string
-            r".+_.+_"  # Skip the first two sections
-            r"(?P<type>\w+)_"  # TYPE section
-            r"(?P<mode>\w+)_"  # MODE section
-            r"\d{8}\d{6}_"  # Date and time section ignored
-            r"(?P<pre>\w+_)?"  # Optional PRE section
-            r"(?P<term1>\w{5,7})-?"  # First term code
-            r"(?P<term2>\w{5,7})?"  # Optional second term code
-            r"_(?P<submitted>.*)\."  # Submitted section
-            r"(?P<ext>\w+)$"  # File extension
+            r"(?P<schoolcode>.+)_" # SCHOOL CODE
+            r"(?P<idx>.+)_"
+            r"(?P<nsctype>\w+)_"  # TYPE section
+            r"(?P<nscmode>\w+)_"  # MODE section
+            r"(?P<subdatetime>\d{8}\d{6})_"  # Date and time section
+            r"(?P<fn>.+)\.(?P<ext>\w+)"  # File name and extension
+            r"$"  # End of the string
         )
+        
+
         match = re.match(pattern, file_name)
         if match:
-            type_mode = match.group(1, 2)
-            pre = match.group(3) or ""
-            term_codes = match.group(4, 5)
-            submitted = match.group(6)
-            ext = match.group(7)
+            named_groups = match.groupdict()
+            # Create global variables for each named group
+            for key, value in named_groups.items():
+                # print(f"Setting global variable {key} to {value}")
+                globals()[key] = value
+                added_base[key] = value
 
-            # Construct the new file name
-            local_file_name = f"{'-'.join(filter(None, term_codes))}_{'_'.join(type_mode)}_{pre}{submitted}.{ext}"
-        else:
-            local_file_name = file_name
+            subdatetime_dt: datetime = datetime.strptime(globals()["subdatetime"], "%m%d%Y%H%M%S") or datetime.today()
+
+        import_cmd: str = ""
+        added: Dict[str, str] = {}
+
+        # Now, loop through the cfg["nsc"]["rename"] list to find a matching entry
+        for rename_entry in cfg["nsc"]["rename"]:
+
+            if added:
+                # Need to remove all the variables added from the previous iteration
+                for key in list(added.keys()):
+                    del globals()[key]
+                    del added[key]
+                
+            # If the modes equal, then we need to look at the pattern for a match
+            if ("mode" in cfg["nsc"]["rename"][rename_entry] and globals()["nscmode"] == cfg["nsc"]["rename"][rename_entry]["mode"]):
+
+                fn_match: Optional[re.Match] = None
+                if ("pattern" in cfg["nsc"]["rename"][rename_entry] and (fn_match := re.match(cfg["nsc"]["rename"][rename_entry]["pattern"], globals()["fn"]))):
+                    if fn_match:
+                        print("Match found for :", rename_entry)
+                        # get the named groups from the regex match and create varables for each named group
+                        named_groups = fn_match.groupdict()
+                        for key, value in named_groups.items():
+                            globals()[key] = value
+                            # Save value in dictionary "added"
+                            added[key] = value
+                    else:
+                        continue
+
+                # Construct the new file name based on the merged_cfg["nsc"]["rename"][rename_entry]["replace"]
+                # The string in that entry is an f-string
+                local_file_name: str = cfg["nsc"]["rename"][rename_entry]["replace"].format(**globals())
+
+            else:
+                # If no matching entry is found, use the original file name
+
+                local_file_name = file_name
+
+            if "local_file_path" in globals():
+                del globals()["local_file_path"]
+            globals()["local_file_path"] = Path(local_receive_path) / local_file_name
+
+            if (globals()["nsctype"] == cfg["nsc"]["import"]["type"] and cfg["nsc"]["rename"][rename_entry]["import"]):
+                # Get the import command from cfg["nsc"]["import"]
+                import_cmd = f"""
+                    python {cfg["nsc"]["import"]["cmd"].format(fn=local_file_path, 
+                                                                  dt=CURRENT_DATETIME_STR,
+                                                                  entry=rename_entry)}
+                                                                  """.strip()
+                # replace the './' with the path to the script
+                import_cmd = import_cmd.replace("./", str(SCRIPT_PATH) + "/").replace("\\", "/")
 
         # Download the file and save it to cfg["nsc"]["local"]["receive_path"]
-        local_file_path = Path(local_receive_path) / local_file_name
-        sftp.get(file_name, local_file_path)
+        sftp.get(file_name, globals()["local_file_path"])
 
         # Fix the timestamp on the new file to match the timestamp on the remote file
         if file_attr.st_atime is not None and file_attr.st_mtime is not None:
-            os.utime(local_file_path, (file_attr.st_atime, file_attr.st_mtime))
+            os.utime(globals()["local_file_path"], (file_attr.st_atime, file_attr.st_mtime))
         else:
             print(
                 f"Skipping timestamp update for {local_file_name} due to missing time attributes"
@@ -212,6 +267,25 @@ def main():
                 current_date_time,
             ]
         )
+
+        # If an import command is specified, execute it
+        if import_cmd:
+            print(f"Running import command: {import_cmd}")
+            # Check if os.system call was successful and log the result
+            if os.system(import_cmd) == 0:
+                print("Import successful")
+                # Write the import information to the log file, if successful
+                log_writer.writerow(
+                    [
+                        file_name,
+                        local_file_path,
+                        file_datetime.strftime("%Y-%m-%d %H:%M:%S"),
+                        "Imported",
+                        current_date_time,
+                    ]
+                )
+            else:
+                print("Import failed")
 
     if new_latest_file_time is not None:
         latest_file_path.touch()

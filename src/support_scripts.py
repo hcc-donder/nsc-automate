@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Dict
 
 def find_root(file_name, start_path=None):
     """
@@ -16,3 +17,12 @@ def find_root(file_name, start_path=None):
         if (parent / file_name).exists():
             return parent
     return Path.cwd()
+
+def merge_dicts(cfg1: Dict, cfg2: Dict) -> Dict:
+    merged = cfg1.copy()  # Start with the values in cfg
+    for key, value in cfg2.items():
+        if isinstance(value, dict) and key in merged:
+            merged[key] = merge_dicts(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
