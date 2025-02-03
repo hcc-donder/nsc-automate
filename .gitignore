@@ -13,3 +13,6 @@ receive/_Archive/*
 nsc_log.csv
 receive/__Latest File Date
 *.zip
+src/*.log
+__pycache__
+src/*.bat
