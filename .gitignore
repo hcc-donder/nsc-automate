@@ -1,18 +1,15 @@
 nscconfig.yml
-archive/*.csv
-archive/*.htm*
-archive/*.txt
+archive/*
+!archive/README.md
 dev/*
 presentations/*
-receive/*.csv
-receive/*.htm*
-receive/*.txt
+receive/*
+!receive/README.md
 receive/_Archive/*
 *.duckdb
 *.SAV
 nsc_log.csv
-receive/__Latest File Date
 *.zip
-src/*.log
+src/*
+!src/*.py
 __pycache__
-src/*.bat
