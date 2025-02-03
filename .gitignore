@@ -13,3 +13,4 @@ nsc_log.csv
 src/*
 !src/*.py
 __pycache__
+.venv
