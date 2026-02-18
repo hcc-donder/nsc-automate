@@ -110,9 +110,10 @@ def main():
     # Connect to the NSC ftp site using the credentials in the config file. The connection is stored in the nsc variable under ftp.
     # Use SFTP to connect to the NSC site.
 
-    # Connect using SFTP
-    transport: Transport = paramiko.Transport((cfg["nsc"]["ftp"]["host"], int(cfg["nsc"]["ftp"]["port"])))
-    transport.connect(username=cfg["nsc"]["ftp"]["username"], password=cfg["nsc"]["ftp"]["password"])
+    # Connect using SFTP with SSH key authentication (like send_nsc_files.py)
+    private_key = paramiko.RSAKey.from_private_key_file(cfg["nsc"]["ftp"]["ssh"])
+    transport: Transport = paramiko.Transport((cfg["nsc"]["ftp"]["host"], int(cfg["nsc"]["ftp"]["port"])) )
+    transport.connect(username=cfg["nsc"]["ftp"]["username"], pkey=private_key)
     sftp: Optional[paramiko.SFTPClient] = paramiko.SFTPClient.from_transport(transport)
     print("Connected to SFTP server")
 
@@ -192,52 +193,48 @@ def main():
         added: Dict[str, str] = {}
 
         # Now, loop through the cfg["nsc"]["rename"] list to find a matching entry
-        for rename_entry in cfg["nsc"]["rename"]:
 
+        matched = False
+        for rename_entry in cfg["nsc"]["rename"]:
             if added:
-                # Need to remove all the variables added from the previous iteration
                 for key in list(added.keys()):
                     del globals()[key]
                     del added[key]
-                
-            # If the modes equal, then we need to look at the pattern for a match
+            # Only proceed if the mode matches
             if ("mode" in cfg["nsc"]["rename"][rename_entry] and globals()["nscmode"] == cfg["nsc"]["rename"][rename_entry]["mode"]):
-
                 fn_match: Optional[re.Match] = None
                 if ("pattern" in cfg["nsc"]["rename"][rename_entry] and (fn_match := re.match(cfg["nsc"]["rename"][rename_entry]["pattern"], globals()["fn"]))):
-                    if fn_match:
-                        print("Match found for :", rename_entry)
-                        # get the named groups from the regex match and create varables for each named group
-                        named_groups = fn_match.groupdict()
-                        for key, value in named_groups.items():
-                            globals()[key] = value
-                            # Save value in dictionary "added"
-                            added[key] = value
-                    else:
-                        continue
+                    # Only if the pattern matches, do the rename
+                    print("Match found for :", rename_entry)
+                    named_groups = fn_match.groupdict()
+                    for key, value in named_groups.items():
+                        globals()[key] = value
+                        added[key] = value
+                    replace_template = cfg["nsc"]["rename"][rename_entry]["replace"]
+                    import string
+                    formatter = string.Formatter()
+                    used_keys = {fname for _, fname, _, _ in formatter.parse(replace_template) if fname}
+                    available_keys = {k: v for k, v in globals().items() if k in used_keys}
+                    try:
+                        local_file_name: str = replace_template.format(**available_keys)
+                    except KeyError as e:
+                        print(f"Warning: missing key {e} for template {replace_template}. Using original file name.")
+                        local_file_name = file_name
+                    matched = True
+                    break  # Stop after the first match
+        # Always set local_file_path for the file, regardless of match
+        if "local_file_path" in globals():
+            del globals()["local_file_path"]
+        globals()["local_file_path"] = Path(local_receive_path) / local_file_name
 
-                # Construct the new file name based on the merged_cfg["nsc"]["rename"][rename_entry]["replace"]
-                # The string in that entry is an f-string
-                local_file_name: str = cfg["nsc"]["rename"][rename_entry]["replace"].format(**globals())
-
-            else:
-                # If no matching entry is found, use the original file name
-
-                local_file_name = file_name
-
-            if "local_file_path" in globals():
-                del globals()["local_file_path"]
-            globals()["local_file_path"] = Path(local_receive_path) / local_file_name
-
-            if (globals()["nsctype"] == cfg["nsc"]["import"]["type"] and cfg["nsc"]["rename"][rename_entry]["import"]):
-                # Get the import command from cfg["nsc"]["import"]
-                import_cmd = f"""
-                    python {cfg["nsc"]["import"]["cmd"].format(fn=local_file_path, 
-                                                                  dt=CURRENT_DATETIME_STR,
-                                                                  entry=rename_entry)}
-                                                                  """.strip()
-                # replace the './' with the path to the script
-                import_cmd = import_cmd.replace("./", str(SCRIPT_PATH) + "/").replace("\\", "/")
+        # Only set import_cmd if a rename entry matched and import is True
+        if matched and (globals()["nsctype"] == cfg["nsc"]["import"]["type"] and cfg["nsc"]["rename"][rename_entry]["import"]):
+            import_cmd = f"""
+                python {cfg["nsc"]["import"]["cmd"].format(fn=globals()["local_file_path"], 
+                                                              dt=CURRENT_DATETIME_STR,
+                                                              entry=rename_entry)}
+                                                              """.strip()
+            import_cmd = import_cmd.replace("./", str(SCRIPT_PATH) + "/").replace("\\", "/")
 
         # Download the file and save it to cfg["nsc"]["local"]["receive_path"]
         sftp.get(file_name, globals()["local_file_path"])
@@ -293,6 +290,8 @@ def main():
 
     print("Done")
     log_file_handle.close()
+    sftp.close()
+    transport.close()
 
 if __name__ == "__main__":
     main()

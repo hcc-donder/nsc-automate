@@ -1,1 +1,0 @@
-This contains all the files that were downloaded from the NSC FTP server. Processing is controlled by the nscconfig.yml file.

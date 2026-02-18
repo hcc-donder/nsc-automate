@@ -83,7 +83,12 @@ def main():
     log_file = Path(cfg["nsc"]["local"]["log_file"])
 
     # Check if there are files to send
-    files_to_send = [local_file for local_file in Path(local_send_path).iterdir() if local_file.is_file()]
+    files_to_send = [
+        local_file for local_file in Path(local_send_path).iterdir()
+        if local_file.is_file()
+        and local_file.name.lower() != "readme.md"
+        and not local_file.name.startswith("_")
+    ]
     if not files_to_send:
         print("No files to send")
         return
@@ -98,9 +103,10 @@ def main():
     log_file_handle = open(log_file, mode='a', newline='', encoding='utf-8')
     log_writer = csv.writer(log_file_handle)
 
-    # Connect using SFTP
+    # Connect using SFTP with SSH key authentication
+    private_key = paramiko.RSAKey.from_private_key_file(cfg["nsc"]["ftp"]["ssh"])
     transport: Transport = paramiko.Transport((cfg["nsc"]["ftp"]["host"], int(cfg["nsc"]["ftp"]["port"])))
-    transport.connect(username=cfg["nsc"]["ftp"]["username"], password=cfg["nsc"]["ftp"]["password"])
+    transport.connect(username=cfg["nsc"]["ftp"]["username"], pkey=private_key)
     sftp: Optional[paramiko.SFTPClient] = paramiko.SFTPClient.from_transport(transport)
     print("Connected to SFTP server")
 
