@@ -137,6 +137,8 @@ def main():
 
     added_base: Dict[str, str] = {}
 
+    import_needed: bool = False
+
     # Iterate over the list of files and their attributes
     for file_attr in sftp.listdir_attr():
         file_name: str = file_attr.filename
@@ -192,8 +194,9 @@ def main():
         import_cmd: str = ""
         added: Dict[str, str] = {}
 
-        # Now, loop through the cfg["nsc"]["rename"] list to find a matching entry
+        local_file_name = file_name
 
+        # Now, loop through the cfg["nsc"]["rename"] list to find a matching entry
         matched = False
         for rename_entry in cfg["nsc"]["rename"]:
             if added:
@@ -213,12 +216,50 @@ def main():
                     replace_template = cfg["nsc"]["rename"][rename_entry]["replace"]
                     import string
                     formatter = string.Formatter()
-                    used_keys = {fname for _, fname, _, _ in formatter.parse(replace_template) if fname}
+                    # Enhanced: parse fields with optional function, e.g., {termid:upper}
+                    def apply_func(val, func):
+                        if func is None:
+                            return val
+                        func = func.lower()
+                        if func == "upper":
+                            return str(val).upper()
+                        elif func == "lower":
+                            return str(val).lower()
+                        else:
+                            raise ValueError(f"Unsupported function: {func}")
+
+                    def format_with_functions(template, context):
+                        result = ""
+                        for literal_text, field_name, format_spec, conversion in formatter.parse(template):
+                            result += literal_text
+                            if field_name is not None:
+                                # Support {field:func}
+                                if ":" in field_name:
+                                    field, func = field_name.split(":", 1)
+                                else:
+                                    field, func = field_name, None
+                                val = context.get(field, "")
+                                val = apply_func(val, func)
+                                result += str(val)
+                        return result
+
+                    # Collect all fields (with or without function)
+                    used_keys = set()
+                    for _, field_name, _, _ in formatter.parse(replace_template):
+                        if field_name:
+                            if ":" in field_name:
+                                field, _ = field_name.split(":", 1)
+                            else:
+                                field = field_name
+                            used_keys.add(field)
                     available_keys = {k: v for k, v in globals().items() if k in used_keys}
                     try:
-                        local_file_name: str = replace_template.format(**available_keys)
+                        local_file_name: str = format_with_functions(replace_template, available_keys)
                     except KeyError as e:
                         print(f"Warning: missing key {e} for template {replace_template}. Using original file name.")
+                        local_file_name = file_name
+                    except ValueError as e:
+                        print(f"Template error: {e}. Using original file name.")
                         local_file_name = file_name
                     matched = True
                     break  # Stop after the first match
@@ -265,33 +306,30 @@ def main():
             ]
         )
 
-        # If an import command is specified, execute it
+        # Imports run once for the whole batch, after the loop
         if import_cmd:
-            print(f"Running import command: {import_cmd}")
-            # Check if os.system call was successful and log the result
-            if os.system(import_cmd) == 0:
-                print("Import successful")
-                # Write the import information to the log file, if successful
-                log_writer.writerow(
-                    [
-                        file_name,
-                        local_file_path,
-                        file_datetime.strftime("%Y-%m-%d %H:%M:%S"),
-                        "Imported",
-                        current_date_time,
-                    ]
-                )
-            else:
-                print("Import failed")
+            import_needed = True
 
     if new_latest_file_time is not None:
         latest_file_path.touch()
         os.utime(latest_file_path, (new_latest_file_time, new_latest_file_time))
 
-    print("Done")
     log_file_handle.close()
     sftp.close()
     transport.close()
+
+    # Load the batch into the warehouse and rebuild the NSC tables.
+    # nsc_import_db.py moves the files to the NSC data folder, loads any file
+    # not yet loaded, logs each file to nsc_log.csv, and runs the build.
+    if import_needed:
+        batch_cmd = f'python "{SCRIPT_PATH / "nsc_import_db.py"}"'
+        print(f"Running import command: {batch_cmd}")
+        if os.system(batch_cmd) == 0:
+            print("Import successful")
+        else:
+            print("Import failed")
+
+    print("Done")
 
 if __name__ == "__main__":
     main()

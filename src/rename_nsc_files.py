@@ -120,6 +120,8 @@ def main():
 
     added_base: Dict[str, str] = {}
 
+    import_needed: bool = False
+
     print(f"Starting to process files in {download_path} from {datetime.fromtimestamp(latest_file_time) if latest_file_time else 'the beginning'}")
 
     # Iterate over all the files in the download_path path in this machine
@@ -272,31 +274,27 @@ def main():
             ]
         )
 
-        # If an import command is specified, execute it
+        # Imports run once for the whole batch, after the loop
         if import_cmd:
-            print(f"Running import command: {import_cmd}")
-            # Check if os.system call was successful and log the result
-            if os.system(import_cmd) == 0:
-                print("Import successful")
-                # Write the import information to the log file, if successful
-                log_writer.writerow(
-                    [
-                        file_name,
-                        local_file_path,
-                        file_datetime.strftime("%Y-%m-%d %H:%M:%S"),
-                        "Imported",
-                        current_date_time,
-                    ]
-                )
-            else:
-                print("Import failed")
+            import_needed = True
 
     if new_latest_file_time is not None:
         latest_file_path.touch()
         os.utime(latest_file_path, (new_latest_file_time, new_latest_file_time))
 
-    print("Done")
     log_file_handle.close()
+
+    # Load the batch into the warehouse and rebuild the NSC tables once.
+    # nsc_import_db.py logs each imported file to nsc_log.csv itself.
+    if import_needed:
+        batch_cmd = f'python "{SCRIPT_PATH / "nsc_import_db.py"}"'
+        print(f"Running import command: {batch_cmd}")
+        if os.system(batch_cmd) == 0:
+            print("Import successful")
+        else:
+            print("Import failed")
+
+    print("Done")
 
 if __name__ == "__main__":
     main()
