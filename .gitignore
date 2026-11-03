@@ -8,7 +8,8 @@ receive/*
 receive/_Archive/*
 *.duckdb
 *.SAV
-nsc_log.csv
+nsc_log*.csv
+id_rsa_nsc_sftp*
 *.zip
 src/*
 !src/*.py
